@@ -1,4 +1,5 @@
-# Frame by frame change simulation
+# Frame by frame change simulation + exploratory analysis of ripped code base to see if useful
+# Source: https://www.pyimagesearch.com/2016/02/08/opencv-shape-detection/
 
 # import the necessary packages
 import argparse
@@ -7,7 +8,7 @@ import cv2
 from pprint import pprint
 
 
-# import the necessary packages
+# Ripped class from source. Probably don't need tbh.
 class ShapeDetector:
 
     def __init__(self):
@@ -42,6 +43,7 @@ class ShapeDetector:
         return shape
 
 
+# This is the arrays used to analyze current structure, as described on the doc
 centers = [[(9 + j * 18, 9 + i * 18) for j in range(300 // 18)] for i in range(225 // 18)]
 top = [[0 for j in range(300 // 18)] for i in range(225 // 18)]
 board = [[(0, 0) for j in range(300 // 18)] for i in range(225 // 18)]
@@ -49,8 +51,14 @@ board = [[(0, 0) for j in range(300 // 18)] for i in range(225 // 18)]
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 
+# For loop is used to simulate frame by frame changes
 for i in range(5):
+    # "there" array used to check if blocks have gotten removed.
+    # 18 -- average width of block from abitrary height used when exploring
+    # 225, 300 -- x and y dimensions used when looking at resized image
     there = [[False for j in range(300 // 18)] for l in range(225 // 18)]
+    
+    # Current image/frame looking at.
     args = "File_00" + str(i) + ".jpeg"
 
     # load the image and resize it to a smaller factor so that
@@ -62,15 +70,23 @@ for i in range(5):
     # and threshold it
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Exploring edge detection and seeing if it could help
     sharp = cv2.Laplacian(blurred, cv2.CV_64F)
 
+    # Change threshold (150) to account for different lighting. Can check
+    # and confirm with the imshow below. Your target should be white while
+    # everything else is black (ideally).
     thresh = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY)[1]
     # find contours in the thresholded image and initialize the
     # shape detector
+
+    # Used to check if contours are really there
     #cv2.imshow("sharp", sharp)
     #cv2.imshow("blur", blurred)
     cv2.imshow("thres", thresh)
     cv2.waitKey(0)
+    
     cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
     sd = ShapeDetector()
@@ -85,28 +101,43 @@ for i in range(5):
         #cX = int((M["m10"] / M["m00"]) * ratio)
         #cY = int((M["m01"] / M["m00"]) * ratio)
         shape = sd.detect(c)
+
+        # Only look for the blocks.
         if not (shape == 'rectangle' or shape == 'square'):
             continue
 
         x, y, w, h = cv2.boundingRect(c)
         print(x, y, w, h)
 
+
+        # Update the board when new blocks come up
         for p in range(len(centers)):
             for q in range(len(centers[0])):
+                # Determine where the block is based on which center it's closest to
+                # Center is like a "drop point" -- see doc
                 center = centers[p][q]
                 x_diff = abs(center[0] - (x + (w // 2)))
                 y_diff = abs(center[1] - (y + (h // 2)))
+
+                # If within half of the width of the bounding box, then it is the closest point
                 if x_diff <= 9 and y_diff <= 9:
+                    # No block at that point case
                     if top[p][q] == 0:
                         top[p][q] += 1
                         board[p][q] = (w, h)
-                    # Instead, come up with a threshold. Need to talk about it
+                    # Block is there, but width and height is greater (due to it being
+                    # elevated -- blah blah depth perception on camera etc)
+                    # Instead, come up with a threshold of what is different enough to be
+                    # determined to be an added block on top. Need to talk about it
+                    # Explain the theory in meeting to see if it makes sense.
                     elif board[p][q][0] < w and board[p][q][1] < h:
                         top[p][q] += 1
                         board[p][q] = (w, h)
+                    # Conversely, width and height is smaller so block is removed.
                     elif board[p][q][0] > w and board[p][q][1] < h:
                         top[p][q] -= 1
                         board[p][q] = (w, h)
+                    # There was a block there, so don't remove when we check later.
                     there[p][q] = True
                     break
             else:
@@ -124,6 +155,9 @@ for i in range(5):
         cv2.imshow("Image", resized)
         cv2.waitKey(0)
 
+    # Check if there was a block at a given drop point. If so, there at that point should be true
+    # and just leave it be bc it's already been processed accordingly in above
+    # code. If not, then that means any block at that point has been completely removed.
     for p in range(len(there)):
         for q in range(len(there[0])):
             if not there[p][q]:
