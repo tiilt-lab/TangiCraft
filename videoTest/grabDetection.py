@@ -27,6 +27,7 @@
     # Fix jitter confirm check (do arr [t f] + t)
         # Have default be first instance
     # Finger ordering as another heuristic
+    #
 
 import cv2
 import mediapipe as mp
@@ -89,9 +90,9 @@ class hand:
         self.grace_period = 0
 
         # Avoid instant fluctuations
-        self.grab_log = []
+        self.gradient = 0
 
-        self.confirm_toggle = 3
+        self.confirm_cap = 5
 
         # Workaround for messed up hands
         if percentage >= 0.7:
@@ -107,8 +108,7 @@ class hand:
         # self.max_gp = 15
         self.max_gp = 1
 
-        # When grabbing changes, the value can't change for another 7 frames
-        self.toggle_gp = -3
+        self.toggle_gp = -6
 
     def __str__(self):
         size = get_dimensions(image)
@@ -223,41 +223,11 @@ class hand:
             self.gradient = 0
         self.grabbing = new_grab
 
-    # Add change to log, if true -- for 5 frame delay
-    # Update delay incrementer
-    # Return the coordinates and print when delay is over, actually update toggle
-    # Delete entry when delay is interrupted
-    def update_toggle(self, mh, mhl, img):
-        info = self.get_grabbing(mh, mhl, img)
-        if info is None:
-            return None, None
-
-        if len(self.grab_log) > 2:
-            print("Error in the grab log.")
-
-        if len(self.grab_log) == 0:
-            self.grab_log.append(info)
-            self.grabbing = self.grab_log[0]["grabbing"]
-        elif len(self.grab_log) == 1 and info["grabbing"] != self.grab_log[0]["grabbing"]:
-            self.grab_log.append(info)
-        elif len(self.grab_log) == 2 and info["grabbing"] != self.grab_log[1]["grabbing"]:
-            self.grab_log.pop(1)
-
-        x, y = None, None
-        if len(self.grab_log) == 2 and self.grab_log[1]["change_delay"] >= self.confirm_toggle:
-            self.grab_log.pop(0)
-            x, y = self.print_toggle()
-            self.grabbing = self.grab_log[0]["grabbing"]
-
-        for grab_info in self.grab_log:
-            grab_info["change_delay"] += 1
-
-        return x, y
-
-    # Get grabbing information for potential insertion into the toggle log
-    def get_grabbing(self, mh, mhl, img):
+    # Check if toggled from grabbing to not, and vice versa. Find loc, convert it to pic coordinates, and print it,
+    # with the change. Return coordinates.
+    def print_toggle(self, mh, mhl, img):
         if self.grace_period <= self.max_gp:
-            return None
+            return None, None
         loc, ind = self.find_loc(mh, mhl)
         if loc is not None:
             thumb = mhl[ind].landmark._values[4]
@@ -266,31 +236,20 @@ class hand:
             x = mid[0]
             y = mid[1]
             grabbing = self.is_grabbing(mh, mhl)
-            size = get_dimensions(img)
-            x = x * size[0]
-            y = y * size[1]
-            return {"grabbing": grabbing, "coordinates": (x, y), "change_delay": 0}
-        return None
-
-    # If toggled. Find loc, convert it to pic coordinates, and print it, with the change. Return coordinates.
-    # Introducing a five frame delay to confirm if it actually changed
-    def print_toggle(self):
-        if len(self.grab_log) > 1:
-            print("Error in grabbing log. Shouldn't print if more than one element.")
-            return None, None
-
-        (x, y) = self.grab_log[0]["coordinates"]
-        grabbing = self.grab_log[0]["grabbing"]
-
-        if grabbing and not self.grabbing:
-            print("Grabbed at ({}, {})".format(x, y))
-            self.grace_period = self.toggle_gp
-            return x, y
-        if self.grabbing and not grabbing:
-            print("Released at ({}, {})".format(x, y))
-            self.grace_period = self.toggle_gp
-            return x, y
-        print("Error: It should toggle.")
+            if grabbing and not self.grabbing and self.gradient >= self.confirm_cap:
+                size = get_dimensions(img)
+                x = x * size[0]
+                y = y * size[1]
+                print("Grabbed at ({}, {})".format(x, y))
+                self.grace_period = self.toggle_gp
+                return x, y
+            if self.grabbing and not grabbing and self.gradient >= self.confirm_cap:
+                size = get_dimensions(img)
+                x = x * size[0]
+                y = y * size[1]
+                self.grace_period = self.toggle_gp
+                print("Released at ({}, {})".format(x, y))
+                return x, y
         return None, None
 
     # Return index. Check if there first, then update grabbing, then update loc.
@@ -301,10 +260,10 @@ class hand:
             return None
 
         self.moving = self.is_moving(loc)
-        # self.update_grabbing(mh, mhl)
+        self.update_grabbing(mh, mhl)
         self.update_loc(mh, mhl)
         self.grace_period += 1
-        # self.gradient += 1
+        self.gradient += 1
         return ind
 
 
@@ -328,7 +287,7 @@ while cap.isOpened():
 
     # print(frame)
     # 137
-    if frame == 48:
+    if frame == 134:
         stop = 0
 
     results = hands.process(image)
@@ -345,7 +304,7 @@ while cap.isOpened():
         ind = 0
         while len(loh) > ind:
             temp_hand = loh[ind]
-            x, y = temp_hand.update_toggle(cmh, cmhl, image)
+            x, y = temp_hand.print_toggle(cmh, cmhl, image)
             if x is not None:
                 lod.append((x, y))
             rem = temp_hand.update_everything(cmh, cmhl)
