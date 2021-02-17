@@ -29,6 +29,9 @@
     # Finger ordering as another heuristic
     #
 
+# Contour mapping doesnt map over when finger drops.
+# Modularized isn't working for reason???
+
 import cv2
 import mediapipe as mp
 import math
@@ -77,6 +80,29 @@ def get_dimensions(img):
     # dsize
     dsize = (width, height)
     return dsize
+
+
+def drawlines(dim, img, b):
+    offset = b.side_length
+
+    # Green color in BGR
+    color = (0, 255, 0)
+
+    # Line thickness of 9 px
+    thickness = 2
+
+    x_start = 0
+    y_start = 0
+    while x_start <= dim[0]:
+        img = cv2.line(img, (x_start, y_start), (x_start, dim[1]), color, thickness)
+        x_start += offset
+
+    x_start = 0
+    while y_start <= dim[1]:
+        img = cv2.line(img, (x_start, y_start), (dim[0], y_start), color, thickness)
+        y_start += offset
+
+    return img
 
 
 class hand:
@@ -227,7 +253,7 @@ class hand:
     # with the change. Return coordinates.
     def print_toggle(self, mh, mhl, img):
         if self.grace_period <= self.max_gp:
-            return None, None
+            return None, None, None
         loc, ind = self.find_loc(mh, mhl)
         if loc is not None:
             thumb = mhl[ind].landmark._values[4]
@@ -242,15 +268,15 @@ class hand:
                 y = y * size[1]
                 print("Grabbed at ({}, {})".format(x, y))
                 self.grace_period = self.toggle_gp
-                return x, y
+                return x, y, True
             if self.grabbing and not grabbing and self.gradient >= self.confirm_cap:
                 size = get_dimensions(img)
                 x = x * size[0]
                 y = y * size[1]
                 self.grace_period = self.toggle_gp
                 print("Released at ({}, {})".format(x, y))
-                return x, y
-        return None, None
+                return x, y, False
+        return None, None, None
 
     # Return index. Check if there first, then update grabbing, then update loc.
     # It'll be on the main function to take index and remove available entry or remove hand.
@@ -266,13 +292,24 @@ class hand:
         self.gradient += 1
         return ind
 
+board = None
 
 # For webcam input:
 hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
 cap = cv2.VideoCapture("IMG_4362.MOV")
 loh = []
+no_hands = None
+trigger = 10
 while cap.isOpened():
     success, image = cap.read()
+
+    if image is None:
+        break
+
+    dsize = get_dimensions(image)
+    if board is None:
+        board = contourUtil.Board(cv2.resize(image, dsize))
+
     if not success:
         print("Ignoring empty camera frame.")
         # If loading a video, use 'break' instead of 'continue'.
@@ -304,7 +341,14 @@ while cap.isOpened():
         ind = 0
         while len(loh) > ind:
             temp_hand = loh[ind]
-            x, y = temp_hand.print_toggle(cmh, cmhl, image)
+            x, y, release = temp_hand.print_toggle(cmh, cmhl, image)
+
+            if release is not None:
+                if release:
+                    board.remove_single(x, y)
+                else:
+                    board.add_single(x, y)
+
             if x is not None:
                 lod.append((x, y))
             rem = temp_hand.update_everything(cmh, cmhl)
@@ -317,8 +361,11 @@ while cap.isOpened():
         for index in range(0, len(cmh)):
             temp_hand = hand(cmhl[index].landmark._values[0], cmh[index].classification._values[0].label, cmh[index].classification._values[0].score)
             loh.append(temp_hand)
+        no_hands = 0
     else:
         loh = []
+        if no_hands is not None:
+            no_hands += 1
 
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
@@ -333,6 +380,10 @@ while cap.isOpened():
     #     if val.moving:
     #         print("moving")
 
+    if no_hands is not None and no_hands > trigger:
+        board.add_low_layer(image)
+        no_hands = 0
+
     dsize = get_dimensions(image)
 
     # resize image
@@ -342,6 +393,8 @@ while cap.isOpened():
         y = int(d[1])
         image = cv2.circle(image, (x, y), 50, (255, 0, 0), 10)
 
+    image = drawlines(dsize, image, board)
+
     cv2.imshow('MediaPipe Hands', image)
     if cv2.waitKey(5) & 0xFF == 27:
         break
@@ -349,3 +402,4 @@ while cap.isOpened():
     frame += 1
 hands.close()
 cap.release()
+

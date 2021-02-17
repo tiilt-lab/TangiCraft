@@ -8,14 +8,21 @@ class Board:
     def __init__(self, img):
         self.side_length = 0
 
+        self.sd = shapeDetection.ShapeDetector()
+
         self.set_side_length(img)
 
-        self.centers = [[(9 + j * 18, 9 + i * 18) for j in range(300 // 18)] for i in range(225 // 18)]
-        self.top = [[0 for j in range(300 // 18)] for i in range(225 // 18)]
+        if self.side_length is None:
+            self.side_length = 36
 
-        self.there = [[False for j in range(300 // 18)] for l in range(225 // 18)]
+        self.width, self.height = img.shape[1], img.shape[0]
 
-        self.sd = shapeDetection.ShapeDetector()
+        self.centers = [[(self.side_length // 2 + j * self.side_length, # min(self.height, self.side_length // 2 + j * self.side_length),
+                          self.side_length // 2 + i * self.side_length) # min(self.width, self.side_length // 2 + i * self.side_length))
+                         for j in range(self.height // self.side_length + 1)] for i in range(self.width // self.side_length + 1)]
+        self.top = [[0 for j in range(self.height // self.side_length + 1)] for i in range(self.width // self.side_length + 1)]
+
+        self.there = [[False for j in range(self.height // self.side_length + 1)] for l in range(self.width // self.side_length + 1)]
 
     def set_side_length(self, img):
         self.side_length = self.get_side_length(img)
@@ -50,7 +57,7 @@ class Board:
             return w
 
     def get_center(self, x, y):
-        w, h = self.side_length
+        w, h = self.side_length, self.side_length
 
         # Update the board when new blocks come up
         for p in range(len(self.centers)):
@@ -62,7 +69,7 @@ class Board:
                 y_diff = abs(center[1] - (y + (h // 2)))
 
                 # If within half of the width of the bounding box, then it is the closest point
-                if x_diff <= 9 and y_diff <= 9:
+                if x_diff <= self.side_length // 2 and y_diff <= self.side_length // 2:
                     return p, q
 
     # Check if a block exists there
@@ -96,6 +103,12 @@ class Board:
         cnts = self.get_contours(img)
         for c in cnts:
             shape = self.sd.detect(c)
+
+            # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
+            # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            # # show the output image
+            # cv2.imshow("Image", img)
+            # cv2.waitKey(0)
 
             if not (shape == 'rectangle' or shape == 'square'):
                 continue
