@@ -56,17 +56,18 @@ class Board:
 
             return w
 
-    def get_center(self, x, y):
-        w, h = self.side_length, self.side_length
+    def tc_to_center(self, x, y, w, h):
+        return (x + (w // 2)), (y + (h // 2))
 
+    def get_center(self, x, y):
         # Update the board when new blocks come up
         for p in range(len(self.centers)):
             for q in range(len(self.centers[0])):
                 # Determine where the block is based on which center it's closest to
                 # Center is like a "drop point" -- see doc
                 center = self.centers[p][q]
-                x_diff = abs(center[0] - (x + (w // 2)))
-                y_diff = abs(center[1] - (y + (h // 2)))
+                x_diff = abs(center[0] - x)
+                y_diff = abs(center[1] - y)
 
                 # If within half of the width of the bounding box, then it is the closest point
                 if x_diff <= self.side_length // 2 and y_diff <= self.side_length // 2:
@@ -104,19 +105,26 @@ class Board:
         for c in cnts:
             shape = self.sd.detect(c)
 
+            if not (shape == 'rectangle' or shape == 'square'):
+                continue
+
             # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
             # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             # # show the output image
             # cv2.imshow("Image", img)
             # cv2.waitKey(0)
 
-            if not (shape == 'rectangle' or shape == 'square'):
-                continue
-
             x, y, w, h = cv2.boundingRect(c)
+            x, y = self.tc_to_center(x, y, w, h)
 
-            # Add single block to topology
-            self.add_single(x, y, low_layer=True)
+            # TODO: decide to replace below line with this chunk. Code works on test case.
+            p, q = self.get_center(x, y)
+            if p > 2 and q > 2:
+                # Add single block to topology
+                self.add_single(x, y, low_layer=True)
+
+            # # Add single block to topology
+            # self.add_single(x, y, low_layer=True)
 
     # Does initial block checking at the first level (make sure the val is non-zero if at least a block is there)
     # Meant to cover the "sliding" that a user can do.
@@ -124,7 +132,7 @@ class Board:
     # build up and our initial code didn't detect it)
     # Also accounts for the clear behavior one might do where they just slide all the blocks out of the workspace
     def surface_level(self, img):
-        self.there = [[False for j in range(300 // 18)] for l in range(225 // 18)]
+        self.there = [[False for j in range(self.height // self.side_length + 1)] for l in range(self.width // self.side_length + 1)]
 
         self.add_low_layer(img)
 
@@ -139,6 +147,16 @@ class Board:
             for q in range(len(self.there[0])):
                 if not self.there[p][q]:
                     self.top[p][q] = 0
+
+    # Function to use if user decides when to build
+    def build_activated(self, log, img):
+        for x, y, release in log:
+            if release:
+                self.remove_single(x, y)
+            else:
+                self.add_single(x, y)
+
+        self.surface_level(img)
 
 
 def get_dimensions(img):

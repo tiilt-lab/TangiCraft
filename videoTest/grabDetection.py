@@ -23,13 +23,13 @@
 
 # Track:
     # Hand angle
-    # Velocity (px per frame) and determine param for difference
     # Fix jitter confirm check (do arr [t f] + t)
         # Have default be first instance
+        # Update -- seems like confirm is inconclusive
     # Finger ordering as another heuristic
-    #
 
-# Contour mapping doesnt map over when finger drops.
+# TODO: Combine Hough method with contour to see if improves.
+
 # Modularized isn't working for reason???
 
 import cv2
@@ -106,14 +106,17 @@ def drawlines(dim, img, b):
 
 
 class hand:
-    def __init__(self, loc, handedness, percentage, grabbing=False):
+    def __init__(self, mhl_val, handedness, percentage, grabbing=False):
         self.was_there = False
-        self.last_loc = loc
+        self.last_loc = mhl_val[0]
         self.moving = False
         self.grabbing = grabbing
         self.handedness = handedness
         self.percentage = percentage
         self.grace_period = 0
+
+        # Slope of hand
+        self.slope = self.get_hand_slope(mhl_val)
 
         # Avoid instant fluctuations
         self.gradient = 0
@@ -138,7 +141,16 @@ class hand:
 
     def __str__(self):
         size = get_dimensions(image)
-        return str(self.last_loc.x * size[0]) + " " + str(self.last_loc.y * size[1]) + " " + str(self.handedness) + " " + str(self.grabbing)
+        return str(self.last_loc.x * size[0]) + " " + str(self.last_loc.y * size[1]) + " " + str(self.handedness) \
+               + " " + str(self.grabbing) + " " + str(self.slope)
+
+    def set_hand_slope(self, mhl_val):
+        self.slope = self.get_hand_slope(mhl_val)
+
+    def get_hand_slope(self, mhl_val):
+        wrist = mhl_val[0]
+        middle_tip = mhl_val[12]
+        return (wrist.y - middle_tip.y) / (wrist.x - middle_tip.x)
 
     def is_still(self, loc):
         distance = eud_dist(loc.x, loc.y, self.last_loc.x, self.last_loc.y)
@@ -155,15 +167,19 @@ class hand:
         for i in range(0, len(mh)):
             handedness = mh[i].classification._values[0].label
             percentage = mh[i].classification._values[0].score
-            loc = mhl[i].landmark._values[0]
+            mhl_val = mhl[i].landmark._values
+            loc = mhl_val[0]
 
             # if self.handedness != handedness:
             #     return None, None
-            if self.is_moving(loc) or self.is_still(loc):
+
+            # TODO: improve param
+            if self.is_moving(loc) or self.is_still(loc): #and abs(self.slope - self.get_hand_slope(mhl_val)) <= 0.2
                 if percentage > 0.7:
                     self.best_hand = handedness
                 self.handedness = handedness
                 self.percentage = percentage
+                self.set_hand_slope(mhl_val)
                 return loc, i
         return None, None
 
@@ -300,20 +316,18 @@ cap = cv2.VideoCapture("IMG_4362.MOV")
 loh = []
 no_hands = None
 trigger = 10
+log = []
 while cap.isOpened():
     success, image = cap.read()
-
-    if image is None:
-        break
-
-    dsize = get_dimensions(image)
-    if board is None:
-        board = contourUtil.Board(cv2.resize(image, dsize))
 
     if not success:
         print("Ignoring empty camera frame.")
         # If loading a video, use 'break' instead of 'continue'.
         break
+
+    dsize = get_dimensions(image)
+    if board is None:
+        board = contourUtil.Board(cv2.resize(image, dsize))
 
     # Flip the image horizontally for a later selfie-view display, and convert
     # the BGR image to RGB.
@@ -349,6 +363,9 @@ while cap.isOpened():
                 else:
                     board.add_single(x, y)
 
+                # Log used to keep track of what was dropped and picked up
+                log.append([x, y, release])
+
             if x is not None:
                 lod.append((x, y))
             rem = temp_hand.update_everything(cmh, cmhl)
@@ -359,7 +376,7 @@ while cap.isOpened():
             else:
                 loh.pop(ind)
         for index in range(0, len(cmh)):
-            temp_hand = hand(cmhl[index].landmark._values[0], cmh[index].classification._values[0].label, cmh[index].classification._values[0].score)
+            temp_hand = hand(cmhl[index].landmark._values, cmh[index].classification._values[0].label, cmh[index].classification._values[0].score)
             loh.append(temp_hand)
         no_hands = 0
     else:
@@ -381,7 +398,7 @@ while cap.isOpened():
     #         print("moving")
 
     if no_hands is not None and no_hands > trigger:
-        board.add_low_layer(image)
+        board.surface_level(image)
         no_hands = 0
 
     dsize = get_dimensions(image)
@@ -394,6 +411,12 @@ while cap.isOpened():
         image = cv2.circle(image, (x, y), 50, (255, 0, 0), 10)
 
     image = drawlines(dsize, image, board)
+
+    for i in range(0, len(board.top)):
+        for j in range(0, len(board.top[0])):
+            if board.top[i][j] != 0:
+                cx, cy = board.centers[i][j]
+                image = cv2.circle(image, (cx, cy), 30, (0, 255, 0), 10)
 
     cv2.imshow('MediaPipe Hands', image)
     if cv2.waitKey(5) & 0xFF == 27:
