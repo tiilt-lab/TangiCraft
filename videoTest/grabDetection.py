@@ -186,7 +186,7 @@ class hand:
     def get_hand_slope(self, mhl_val):
         wrist = mhl_val[0]
         middle_tip = mhl_val[12]
-        return (wrist[1] - middle_tip[1]) / (wrist[0] - middle_tip[0])
+        return math.tanh((wrist[1] - middle_tip[1]) / (wrist[0] - middle_tip[0]))
 
     def is_still(self, loc):
         distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
@@ -197,6 +197,9 @@ class hand:
         distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
         params = self.distance_params
         return params[0] < distance < params[1]
+
+    def is_rotated(self, mhl_val):
+        return abs(self.slope - self.get_hand_slope(mhl_val)) < 0.25
 
     # Return new location and index if there, else return None
     def find_loc(self, mh, mhl):
@@ -210,7 +213,7 @@ class hand:
             #     return None, None
 
             # TODO: improve param
-            if self.is_moving(loc) or self.is_still(loc): #and abs(self.slope - self.get_hand_slope(mhl_val)) <= 0.2
+            if (self.is_moving(loc) or self.is_still(loc)) and self.is_rotated(mhl_val):
                 if percentage > 0.7:
                     self.best_hand = handedness
                 self.handedness = handedness
@@ -423,10 +426,13 @@ while cap.isOpened():
         # print(str(h) + ": " + str(loh[h]))
         continue
 
-    # Test if it's moving
-    # for val in loh:
-    #     if val.moving:
-    #         print("moving")
+    # if len(loh) > 0:
+    #     # Test if it's moving
+    #     for val in loh:
+    #         print(val)
+    #     print("     ")
+    #     # if val.moving:
+    #     #     print("moving")
 
     if no_hands is not None and no_hands > trigger:
         board.surface_level(image)
