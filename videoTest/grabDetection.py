@@ -212,7 +212,6 @@ class hand:
             # if self.handedness != handedness:
             #     return None, None
 
-            # TODO: improve param
             if (self.is_moving(loc) or self.is_still(loc)) and self.is_rotated(mhl_val):
                 if percentage > 0.7:
                     self.best_hand = handedness
