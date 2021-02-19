@@ -28,8 +28,6 @@
         # Update -- seems like confirm is inconclusive
     # Finger ordering as another heuristic
 
-# TODO: Combine Hough method with contour to see if improves.
-
 # Modularized isn't working for reason???
 
 import cv2
@@ -103,6 +101,34 @@ def drawlines(dim, img, b):
         y_start += offset
 
     return img
+
+
+def prompt_measurement(cap, img):
+    txt = 'Put Block Down For Measurement. Press "a" when complete.'
+    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+
+    ds = get_dimensions(img)
+    # resize image
+    img_txt = cv2.resize(img_txt, ds)
+
+    cv2.imshow('MediaPipe Hands', img_txt)
+    if cv2.waitKey(0) == ord('a'):
+        pass
+
+    _, img = cap.read()
+    board_ret = contourUtil.Board(img)
+
+    txt = 'Remove block. Press "a" when complete.'
+    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+
+    ds = get_dimensions(img)
+    # resize image
+    img_txt = cv2.resize(img_txt, ds)
+
+    cv2.imshow('MediaPipe Hands', img_txt)
+    if cv2.waitKey(0) == ord('a'):
+        pass
+    return board_ret
 
 
 class hand:
@@ -327,7 +353,9 @@ while cap.isOpened():
 
     dsize = get_dimensions(image)
     if board is None:
-        board = contourUtil.Board(cv2.resize(image, dsize))
+        # Replace with board prompt
+        # board = contourUtil.Board(cv2.resize(image, dsize))
+        board = prompt_measurement(cap, image)
 
     # Flip the image horizontally for a later selfie-view display, and convert
     # the BGR image to RGB.

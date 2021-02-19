@@ -1,6 +1,7 @@
 from videoTest import shapeDetection
 import cv2
 import imutils
+import numpy as np
 
 
 class Board:
@@ -15,7 +16,10 @@ class Board:
         if self.side_length is None:
             self.side_length = 36
 
-        self.width, self.height = img.shape[1], img.shape[0]
+        # TODO: Remove when standard height is set and workflow for finding side length occurs
+        self.side_length = 36
+
+        self.width, self.height = img.shape[0], img.shape[1]
 
         self.centers = [[(self.side_length // 2 + j * self.side_length, # min(self.height, self.side_length // 2 + j * self.side_length),
                           self.side_length // 2 + i * self.side_length) # min(self.width, self.side_length // 2 + i * self.side_length))
@@ -27,24 +31,8 @@ class Board:
     def set_side_length(self, img):
         self.side_length = self.get_side_length(img)
 
-    def get_contours(self, img):
-        dsize = get_dimensions(img)
-
-        # resize image
-        resized = cv2.resize(img, dsize)
-
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-        thresh = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY)[1]
-
-        cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
-
-        return cnts
-
     def get_side_length(self, img):
-        cnts = self.get_contours(img)
+        cnts = get_contours(img)
 
         for c in cnts:
             shape = self.sd.detect(c)
@@ -101,7 +89,7 @@ class Board:
 
     # This is the adding blocks to the top part for the lowest layer if there aren't already blocks labeled there.
     def add_low_layer(self, img):
-        cnts = self.get_contours(img)
+        cnts = get_contours(img)
         for c in cnts:
             shape = self.sd.detect(c)
 
@@ -170,3 +158,39 @@ def get_dimensions(img):
     # dsize
     dsize = (width, height)
     return dsize
+
+
+def get_contours(img):
+    dsize = get_dimensions(img)
+
+    # resize image
+    resized = cv2.resize(img, dsize)
+
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    thresh = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY)[1]
+    gray = cv2.bilateralFilter(gray, -10, 25, 10)
+
+    edges = cv2.Canny(gray, 100, 200, apertureSize=3)
+
+    e_adj = np.absolute(edges)
+    edges = np.uint8(e_adj)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 1, minLineLength=1, maxLineGap=15)
+    for line in lines:
+        line = line[0]
+        cv2.line(thresh, (line[0], line[1]), (line[2], line[3]), (0, 0, 0), 1)
+
+    thresh1 = cv2.subtract(thresh, edges)
+    # for i in range(thresh.shape[0]):
+    #     for j in range(thresh.shape[1]):
+    #         thresh[i][j] = max(0, thresh[i][j] - edges[i][j])
+
+    cv2.imshow("Image", thresh)
+    cv2.waitKey(0)
+
+    cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+
+    return cnts
+
