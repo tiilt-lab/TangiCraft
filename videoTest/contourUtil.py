@@ -147,26 +147,8 @@ class Board:
         self.surface_level(img)
 
 
-def get_dimensions(img):
-    # percent by which the image is resized
-    scale_percent = 50
-
-    # calculate the 50 percent of original dimensions
-    width = int(img.shape[1] * scale_percent / 100)
-    height = int(img.shape[0] * scale_percent / 100)
-
-    # dsize
-    dsize = (width, height)
-    return dsize
-
-
 def get_contours(img):
-    dsize = get_dimensions(img)
-
-    # resize image
-    resized = cv2.resize(img, dsize)
-
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
     thresh = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY)[1]
@@ -177,17 +159,18 @@ def get_contours(img):
     e_adj = np.absolute(edges)
     edges = np.uint8(e_adj)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 1, minLineLength=1, maxLineGap=15)
-    for line in lines:
-        line = line[0]
-        cv2.line(thresh, (line[0], line[1]), (line[2], line[3]), (0, 0, 0), 1)
+    if lines is not None:
+        for line in lines:
+            line = line[0]
+            cv2.line(thresh, (line[0], line[1]), (line[2], line[3]), (0, 0, 0), 1)
 
     thresh1 = cv2.subtract(thresh, edges)
     # for i in range(thresh.shape[0]):
     #     for j in range(thresh.shape[1]):
     #         thresh[i][j] = max(0, thresh[i][j] - edges[i][j])
 
-    cv2.imshow("Image", thresh)
-    cv2.waitKey(0)
+    # cv2.imshow("Image", thresh)
+    # cv2.waitKey(0)
 
     cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)

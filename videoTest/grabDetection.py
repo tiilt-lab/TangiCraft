@@ -50,12 +50,23 @@ def find_midpoint(a_x, a_y, b_x, b_y):
     return ((a_x + b_x) / 2, (a_y + b_y) / 2)
 
 
+def hlist_to_coords(hlist, dsize):
+    ret = []
+    for hl in hlist:
+        temp1 = []
+        for val in hl.landmark._values:
+            temp = [val.x * dsize[0], val.y * dsize[1]]
+            temp1.append(temp)
+        ret.append(temp1)
+    return ret
+
+
 def finger_to_finger_dist(hl, f1, f2):
     i1 = f1 * 4
     i2 = f2 * 4
-    point1 = hl.landmark._values[i1]
-    point2 = hl.landmark._values[i2]
-    distance = eud_dist(point1.x, point1.y, point2.x, point2.y)
+    point1 = hl[i1]
+    point2 = hl[i2]
+    distance = eud_dist(point1[0], point1[1], point2[0], point2[1])
     return distance
 
 
@@ -67,7 +78,7 @@ def is_finger_near_finger(hl, f1, f2, lb, ub):
     return lb < finger_to_finger_dist(hl, f1, f2) < ub
 
 
-def get_dimensions(img):
+def get_half_dimensions(img):
     # percent by which the image is resized
     scale_percent = 50
 
@@ -105,25 +116,20 @@ def drawlines(dim, img, b):
 
 def prompt_measurement(cap, img):
     txt = 'Put Block Down For Measurement. Press "a" when complete.'
-    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
-
-    ds = get_dimensions(img)
-    # resize image
-    img_txt = cv2.resize(img_txt, ds)
+    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 2, cv2.LINE_AA)
 
     cv2.imshow('MediaPipe Hands', img_txt)
     if cv2.waitKey(0) == ord('a'):
         pass
 
     _, img = cap.read()
+    ds = get_half_dimensions(img)
+    # resize image
+    img = cv2.resize(img, ds)
     board_ret = contourUtil.Board(img)
 
     txt = 'Remove block. Press "a" when complete.'
-    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
-
-    ds = get_dimensions(img)
-    # resize image
-    img_txt = cv2.resize(img_txt, ds)
+    img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 2, cv2.LINE_AA)
 
     cv2.imshow('MediaPipe Hands', img_txt)
     if cv2.waitKey(0) == ord('a'):
@@ -132,7 +138,7 @@ def prompt_measurement(cap, img):
 
 
 class hand:
-    def __init__(self, mhl_val, handedness, percentage, grabbing=False):
+    def __init__(self, mhl_val, handedness, percentage, curr_board, grabbing=False):
         self.was_there = False
         self.last_loc = mhl_val[0]
         self.moving = False
@@ -156,8 +162,9 @@ class hand:
             self.best_hand = None
 
         # Arbitrary values, need to mess around with
-        self.distance_params = [0.020, 0.08]
-        self.grabbing_params = [0, 0.08]
+        self.distance_params = [curr_board.side_length / 4, curr_board.side_length]
+        # Trying to do sqrt(2) more than side length in the case of holding it by the diagonal
+        self.grabbing_params = [0, curr_board.side_length * 1.35]
 
         # Only bc my hand did that weird thing was 15 added
         # self.max_gp = 15
@@ -166,8 +173,11 @@ class hand:
         self.toggle_gp = -6
 
     def __str__(self):
-        size = get_dimensions(image)
-        return str(self.last_loc.x * size[0]) + " " + str(self.last_loc.y * size[1]) + " " + str(self.handedness) \
+        return str(self.last_loc[0]) + " " + str(self.last_loc[1]) + " " + str(self.handedness) \
+               + " " + str(self.grabbing) + " " + str(self.slope)
+
+    def __repr__(self):
+        return str(self.last_loc[0]) + " " + str(self.last_loc[1]) + " " + str(self.handedness) \
                + " " + str(self.grabbing) + " " + str(self.slope)
 
     def set_hand_slope(self, mhl_val):
@@ -176,15 +186,15 @@ class hand:
     def get_hand_slope(self, mhl_val):
         wrist = mhl_val[0]
         middle_tip = mhl_val[12]
-        return (wrist.y - middle_tip.y) / (wrist.x - middle_tip.x)
+        return (wrist[1] - middle_tip[1]) / (wrist[0] - middle_tip[0])
 
     def is_still(self, loc):
-        distance = eud_dist(loc.x, loc.y, self.last_loc.x, self.last_loc.y)
+        distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
         params = self.distance_params
         return distance < params[0]
 
     def is_moving(self, loc):
-        distance = eud_dist(loc.x, loc.y, self.last_loc.x, self.last_loc.y)
+        distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
         params = self.distance_params
         return params[0] < distance < params[1]
 
@@ -193,7 +203,7 @@ class hand:
         for i in range(0, len(mh)):
             handedness = mh[i].classification._values[0].label
             percentage = mh[i].classification._values[0].score
-            mhl_val = mhl[i].landmark._values
+            mhl_val = mhl[i]
             loc = mhl_val[0]
 
             # if self.handedness != handedness:
@@ -233,34 +243,28 @@ class hand:
         thirdFingerIsOpen = False
         fourthFingerIsOpen = False
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[2].x
-        if hand_landmarks.landmark._values[3].x < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            4].x < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[2][0]
+        if hand_landmarks[3][0] < pseudoFixKeyPoint and hand_landmarks[4][0] < pseudoFixKeyPoint:
             thumbIsOpen = True
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[6].y
-        if hand_landmarks.landmark._values[7].y < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            8].y < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[6][1]
+        if hand_landmarks[7][1] < pseudoFixKeyPoint and hand_landmarks[8][1] < pseudoFixKeyPoint:
             firstFingerIsOpen = True
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[6].x
-        if hand_landmarks.landmark._values[7].x < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            8].x < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[6][0]
+        if hand_landmarks[7][0] < pseudoFixKeyPoint and hand_landmarks[8][0] < pseudoFixKeyPoint:
             firstFingerIsOpen = True
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[10].y
-        if hand_landmarks.landmark._values[11].y < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            12].y < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[10][1]
+        if hand_landmarks[11][1] < pseudoFixKeyPoint and hand_landmarks[12][1] < pseudoFixKeyPoint:
             secondFingerIsOpen = True
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[14].y
-        if hand_landmarks.landmark._values[15].y < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            16].y < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[14][1]
+        if hand_landmarks[15][1] < pseudoFixKeyPoint and hand_landmarks[16][1] < pseudoFixKeyPoint:
             thirdFingerIsOpen = True
 
-        pseudoFixKeyPoint = hand_landmarks.landmark._values[18].y
-        if hand_landmarks.landmark._values[19].y < pseudoFixKeyPoint and hand_landmarks.landmark._values[
-            20].y < pseudoFixKeyPoint:
+        pseudoFixKeyPoint = hand_landmarks[18][1]
+        if hand_landmarks[19][1] < pseudoFixKeyPoint and hand_landmarks[20][1] < pseudoFixKeyPoint:
             fourthFingerIsOpen = True
 
         p = self.grabbing_params
@@ -298,23 +302,17 @@ class hand:
             return None, None, None
         loc, ind = self.find_loc(mh, mhl)
         if loc is not None:
-            thumb = mhl[ind].landmark._values[4]
-            index = mhl[ind].landmark._values[8]
-            mid = find_midpoint(thumb.x, thumb.y, index.x, index.y)
+            thumb = mhl[ind][4]
+            index = mhl[ind][8]
+            mid = find_midpoint(thumb[0], thumb[1], index[0], index[1])
             x = mid[0]
             y = mid[1]
             grabbing = self.is_grabbing(mh, mhl)
             if grabbing and not self.grabbing and self.gradient >= self.confirm_cap:
-                size = get_dimensions(img)
-                x = x * size[0]
-                y = y * size[1]
                 print("Grabbed at ({}, {})".format(x, y))
                 self.grace_period = self.toggle_gp
                 return x, y, True
             if self.grabbing and not grabbing and self.gradient >= self.confirm_cap:
-                size = get_dimensions(img)
-                x = x * size[0]
-                y = y * size[1]
                 self.grace_period = self.toggle_gp
                 print("Released at ({}, {})".format(x, y))
                 return x, y, False
@@ -351,7 +349,11 @@ while cap.isOpened():
         # If loading a video, use 'break' instead of 'continue'.
         break
 
-    dsize = get_dimensions(image)
+    dsize = get_half_dimensions(image)
+
+    # resize image
+    image = cv2.resize(image, dsize)
+
     if board is None:
         # Replace with board prompt
         # board = contourUtil.Board(cv2.resize(image, dsize))
@@ -364,9 +366,9 @@ while cap.isOpened():
     # pass by reference.
     image.flags.writeable = False
 
-    # print(frame)
+    #print(frame)
     # 137
-    if frame == 134:
+    if frame == 210:
         stop = 0
 
     results = hands.process(image)
@@ -377,9 +379,9 @@ while cap.isOpened():
 
     lod = []
     cmh = deepcopy(results.multi_handedness)
-    cmhl = deepcopy(results.multi_hand_landmarks)
 
     if cmh is not None:
+        cmhl = hlist_to_coords(results.multi_hand_landmarks, dsize)
         ind = 0
         while len(loh) > ind:
             temp_hand = loh[ind]
@@ -404,7 +406,8 @@ while cap.isOpened():
             else:
                 loh.pop(ind)
         for index in range(0, len(cmh)):
-            temp_hand = hand(cmhl[index].landmark._values, cmh[index].classification._values[0].label, cmh[index].classification._values[0].score)
+            temp_hand = hand(cmhl[index], cmh[index].classification._values[0].label,
+                             cmh[index].classification._values[0].score, board)
             loh.append(temp_hand)
         no_hands = 0
     else:
@@ -429,10 +432,6 @@ while cap.isOpened():
         board.surface_level(image)
         no_hands = 0
 
-    dsize = get_dimensions(image)
-
-    # resize image
-    image = cv2.resize(image, dsize)
     for d in lod:
         x = int(d[0])
         y = int(d[1])
