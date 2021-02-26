@@ -33,6 +33,7 @@ class Board:
 
     def get_side_length(self, img):
         cnts = get_contours(img)
+        ret = 0
 
         for c in cnts:
             shape = self.sd.detect(c)
@@ -40,9 +41,19 @@ class Board:
             if not (shape == 'rectangle' or shape == 'square'):
                 continue
 
+            # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
+            # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            # # show the output image
+            # cv2.imshow("Image", img)
+            # cv2.waitKey(0)
+
             x, y, w, h = cv2.boundingRect(c)
 
-            return w
+            if w > ret:
+                ret = w
+
+        if ret != 0:
+            return ret
 
     def tc_to_center(self, x, y, w, h):
         return (x + (w // 2)), (y + (h // 2))
@@ -96,20 +107,22 @@ class Board:
             if not (shape == 'rectangle' or shape == 'square'):
                 continue
 
-            # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
-            # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            # # show the output image
-            # cv2.imshow("Image", img)
-            # cv2.waitKey(0)
-
             x, y, w, h = cv2.boundingRect(c)
-            x, y = self.tc_to_center(x, y, w, h)
 
-            # TODO: decide to replace below line with this chunk. Code works on test case.
-            p, q = self.get_center(x, y)
-            if p > 2 and q > 2:
-                # Add single block to topology
-                self.add_single(x, y, low_layer=True)
+            if abs(w - self.side_length) <= 15:
+                # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
+                # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                # # show the output image
+                # cv2.imshow("Image", img)
+                # cv2.waitKey(0)
+
+                x, y = self.tc_to_center(x, y, w, h)
+
+                # TODO: decide to replace below line with this chunk. Code works on test case.
+                p, q = self.get_center(x, y)
+                if p > len(self.centers) // 6 and q > len(self.centers) // 6:
+                    # Add single block to topology
+                    self.add_single(x, y, low_layer=True)
 
             # # Add single block to topology
             # self.add_single(x, y, low_layer=True)
@@ -164,16 +177,15 @@ def get_contours(img):
             line = line[0]
             cv2.line(thresh, (line[0], line[1]), (line[2], line[3]), (0, 0, 0), 1)
 
-    thresh1 = cv2.subtract(thresh, edges)
-    # for i in range(thresh.shape[0]):
-    #     for j in range(thresh.shape[1]):
-    #         thresh[i][j] = max(0, thresh[i][j] - edges[i][j])
-
-    # cv2.imshow("Image", thresh)
-    # cv2.waitKey(0)
-
     cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
+
+    # for c in cnts:
+    #     cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
+    #     # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    #     # show the output image
+    #     cv2.imshow("Image", img)
+    #     cv2.waitKey(0)
 
     return cnts
 

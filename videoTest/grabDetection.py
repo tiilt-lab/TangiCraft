@@ -338,7 +338,7 @@ board = None
 
 # For webcam input:
 hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
-cap = cv2.VideoCapture("IMG_4362.MOV")
+cap = cv2.VideoCapture("./testVideos/IMG_4362.MOV")
 loh = []
 no_hands = None
 trigger = 10
