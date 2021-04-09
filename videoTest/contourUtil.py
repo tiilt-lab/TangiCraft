@@ -53,8 +53,8 @@ class Board:
         # Whatever is placed on the board will map to the closest center, to standardize where the blocks will map to in
         # Minecraft, which are the index set for top
 
-        self.centers = [[(self.side_length // 2 + j * self.side_length, # min(self.height, self.side_length // 2 + j * self.side_length),
-                          self.side_length // 2 + i * self.side_length) # min(self.width, self.side_length // 2 + i * self.side_length))
+        self.centers = [[(self.side_length // 2 + j * self.side_length,
+                          self.side_length // 2 + i * self.side_length)
                          for j in range(self.height // self.side_length + 1)] for i in range(self.width // self.side_length + 1)]
 
         # Creates an array that represents a topological graph.
@@ -80,12 +80,6 @@ class Board:
             # Only look at contours that are rectangles or squares because the rest probably aren't blocks
             if not (shape == 'rectangle' or shape == 'square'):
                 continue
-
-            # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
-            # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            # # show the output image
-            # cv2.imshow("Image", img)
-            # cv2.waitKey(0)
 
             x, y, w, h = cv2.boundingRect(c)
 
@@ -172,12 +166,6 @@ class Board:
 
             # Basically check if the contour you are looking at even remotely is close to the length of the side
             if w / self.side_length <= self.side_deviation_threshold:
-                # cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
-                # # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-                # # show the output image
-                # cv2.imshow("Image", img)
-                # cv2.waitKey(0)
-
                 # Convert top corner coordinates to center
                 x, y = self.tc_to_center(x, y, w, h)
 
@@ -188,9 +176,6 @@ class Board:
                 if p > len(self.centers) // self.border_ratio and q > len(self.centers) // self.border_ratio:
                     # Add single block to topology
                     self.add_single(x, y, low_layer=True)
-
-            # # Add single block to topology
-            # self.add_single(x, y, low_layer=True)
 
     # Does initial block checking at the first level (make sure the val is non-zero if at least a block is there)
     # Meant to cover the "sliding" that a user can do.
@@ -256,13 +241,6 @@ def get_contours(img):
     # Get the contours
     cnts = cv2.findContours(thresh.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
-
-    # for c in cnts:
-    #     cv2.drawContours(img, [c], -1, (0, 255, 0), 2)
-    #     # cv2.putText(image, shape, (cX, cY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-    #     # show the output image
-    #     cv2.imshow("Image", img)
-    #     cv2.waitKey(0)
 
     return cnts
 
