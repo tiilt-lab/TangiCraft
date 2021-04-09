@@ -1,3 +1,5 @@
+# TODO: Compile list of adjusted parameters and finish documenting main
+
 # So far implemented own version of object tracking. Works alright for one hand.
 # Only worked on gripping with thumb and index finger. Need to open up for other methods.
 # Grip detection is not bad actually. There's probably a better way though.
@@ -437,30 +439,43 @@ class hand:
 
 
 def main():
+    # For debugging purposes
     frame = 0
+
+    # Board for Minecraft conversion
     board = None
 
-    # For webcam input:
+    # Initialize hand detection
     hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
+
+    # For webcam input:
     cap = cv2.VideoCapture("./testVideos/IMG_4362.MOV")
+
+    # List of hands
     loh = []
+
+    # Whether a frame has no hands in it
     no_hands = None
+
+    # Trigger board cleanup when there are no hands for 10 consecutive frames
     trigger = 10
+
+    # Log of all the actions taken
     log = []
     while cap.isOpened():
+        # Read the image
         success, image = cap.read()
-        og_image = image
 
         if not success:
             print("Ignoring empty camera frame.")
             # If loading a video, use 'break' instead of 'continue'.
             break
 
+        # Resize image
         dsize = get_half_dimensions(image)
-
-        # resize image
         image = cv2.resize(image, dsize)
 
+        # Set up board if not set up already
         if board is None:
             # Replace with board prompt
             # board = contourUtil.Board(cv2.resize(image, dsize))
@@ -473,27 +488,39 @@ def main():
         # pass by reference.
         image.flags.writeable = False
 
-        #print(frame)
-        # 137
+        # For debugging purposes
+        # print(frame)
         if frame == 209:
             stop = 0
 
+        # Find the hands in the images
         results = hands.process(image)
 
         # Draw the hand annotations on the image.
         image.flags.writeable = True
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
+        # List of coordinates where blocks have been grabbed or dropped
         lod = []
+
+        # Get a copy of the hand info
         cmh = deepcopy(results.multi_handedness)
 
+        # If hand info is none then there are no hands in the frame
         if cmh is not None:
+            # Convert all hand point normalized coordinates to image coordinates.
             cmhl = hlist_to_coords(results.multi_hand_landmarks, dsize)
             ind = 0
+
+            # Iterate through the hands
             while len(loh) > ind:
+                # Get current hand
                 temp_hand = loh[ind]
+
+                # See if any grab or drop occurred
                 x, y, release = temp_hand.print_toggle(cmh, cmhl, image)
 
+                # If a grab or drop occurred, update the board
                 if release is not None:
                     if release:
                         board.remove_single(x, y)
@@ -503,32 +530,45 @@ def main():
                     # Log used to keep track of what was dropped and picked up
                     log.append([x, y, release])
 
+                # If there was a grab or drop, add it to the list of coordinates to mark the location
                 if x is not None:
                     lod.append((x, y))
+
+                # Update all the information about the hand from the last time to this frame
                 rem = temp_hand.update_everything(cmh, cmhl)
+
+                # If hand is successfully tracked and updated, remove from hand results for the frame
+                # Otherwise remove from list of hands we are tracking
                 if rem is not None:
                     cmh.pop(rem)
                     cmhl.pop(rem)
                     ind += 1
                 else:
                     loh.pop(ind)
+
+            # Add whatever remaining hands that didn't match any of the tracked hands to the tracked hands list
+            # In other words, we begin tracking the "new" hands (might be mistakenly considered new)
             for index in range(0, len(cmh)):
                 temp_hand = hand(cmhl[index], cmh[index].classification._values[0].label,
                                  cmh[index].classification._values[0].score, board)
                 loh.append(temp_hand)
             no_hands = 0
         else:
+            # No hands are detected so remove all the currently tracked hands and update the no_hands state
+            # No hands state only begins keeping track after hands initially appear
             loh = []
             if no_hands is not None:
                 no_hands += 1
 
+        # Draw the points on the hand
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
                 mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-        for h in range(0, len(loh)):
-            # print(str(h) + ": " + str(loh[h]))
-            continue
+        # For debugging purposes
+        # for h in range(0, len(loh)):
+        #     # print(str(h) + ": " + str(loh[h]))
+        #     continue
 
         # if len(loh) > 0:
         #     # Test if it's moving
@@ -538,31 +578,39 @@ def main():
         #     # if val.moving:
         #     #     print("moving")
 
+        # Check if the no_hands state has started keeping track and is triggered
         if no_hands is not None and no_hands > trigger:
-            # board.surface_level(og_image)
+            # If triggered, reset the no hands state and clean up the surface
             board.surface_level(image)
             no_hands = 0
 
+        # Draw circles to mark where blocks were placed in this frame
         for d in lod:
             x = int(d[0])
             y = int(d[1])
             image = cv2.circle(image, (x, y), 50, (255, 0, 0), 10)
 
+        # Draw grid lines to the image
         image = drawlines(dsize, image, board)
 
+        # Draw marks on where blocks are located at all times
         for i in range(0, len(board.top)):
             for j in range(0, len(board.top[0])):
                 if board.top[i][j] != 0:
                     cx, cy = board.centers[i][j]
                     image = cv2.circle(image, (cx, cy), 30, (0, 255, 0), 10)
 
+        # Display the new augmented frame.
         cv2.imshow('MediaPipe Hands', image)
         if cv2.waitKey(5) & 0xFF == 27:
             break
 
         frame += 1
+
+    # Close the hand and video code after video or stream is over
     hands.close()
     cap.release()
+
 
 if __name__ == "__main__":
     main()
