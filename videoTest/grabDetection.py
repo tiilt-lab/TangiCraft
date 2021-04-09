@@ -38,18 +38,19 @@ from videoTest import contourUtil
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
-frame = 0
 
-
+# Get euclidean distance of two points
 def eud_dist(a_x, a_y, b_x, b_y):
     dist = ((a_x - b_x) ** 2) + ((a_y - b_y) ** 2)
     return math.sqrt(dist)
 
 
+# Get midpoint of two points
 def find_midpoint(a_x, a_y, b_x, b_y):
     return ((a_x + b_x) / 2, (a_y + b_y) / 2)
 
 
+# Convert normalized hand coordiates to image coordinates
 def hlist_to_coords(hlist, dsize):
     ret = []
     for hl in hlist:
@@ -61,6 +62,7 @@ def hlist_to_coords(hlist, dsize):
     return ret
 
 
+# Get the distance between two fingertips
 def finger_to_finger_dist(hl, f1, f2):
     i1 = f1 * 4
     i2 = f2 * 4
@@ -70,14 +72,17 @@ def finger_to_finger_dist(hl, f1, f2):
     return distance
 
 
+# Check if thumb is near finger based on a upper and lower bound
 def is_thumb_near_finger(hl, finger, lb, ub):
     return is_finger_near_finger(hl, 1, finger, lb, ub)
 
 
+# Check if finger is near finger based on a upper and lower bound
 def is_finger_near_finger(hl, f1, f2, lb, ub):
     return lb < finger_to_finger_dist(hl, f1, f2) < ub
 
 
+# Get the half dimensions of a image
 def get_half_dimensions(img):
     # percent by which the image is resized
     scale_percent = 50
@@ -91,6 +96,7 @@ def get_half_dimensions(img):
     return dsize
 
 
+# Draw the grid lines
 def drawlines(dim, img, b):
     offset = b.side_length
 
@@ -114,6 +120,7 @@ def drawlines(dim, img, b):
     return img
 
 
+# Get the measurement of the blocks
 def prompt_measurement(cap, img):
     txt = 'Put Block Down For Measurement. Press "a" when complete.'
     img_txt = cv2.putText(img, txt, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 2, cv2.LINE_AA)
@@ -140,103 +147,165 @@ def prompt_measurement(cap, img):
 class hand:
     def __init__(self, mhl_val, handedness, percentage, curr_board, grabbing=False):
         self.was_there = False
+
+        # Last location of the hand (based on wrist)
         self.last_loc = mhl_val[0]
+
+        # State of whether the hand is moving
         self.moving = False
+
+        # State of whether the hand is grabbing something
         self.grabbing = grabbing
+
+        # Whether it's the left or right hand
         self.handedness = handedness
+
+        # How certain one is about whether it's the left or right hand
         self.percentage = percentage
-        self.grace_period = 0
+
+        # Keep track of the time since a hand appeared
+        # The code won't start detecting if the hand is grabbing anything until the grace period is past the
+        # maximum grace period set (self.max_gp)
+        self.grace_period_timer = 0
+
+        # Only bc my hand did that weird thing was 15 added
+        # self.max_gp = 15
+        self.grace_period_timer_threshold = 1
+
+        # Might not need
+        # The hand resets the grace period when it drops or grabs something
+        # The heuristic is that we are assuming the hand can't actually re-drop or re-grab anything in 6 frames (0.1 of
+        # a second), so we don't want to record anything for those frames
+        self.grace_period_reset_toggle = -6
 
         # Slope of hand
         self.slope = self.get_hand_slope(mhl_val)
 
         # Avoid instant fluctuations
-        self.gradient = 0
+        # The heuristic is that we are assuming the hand can't actually re-drop or re-grab anything in 6 frames (0.1 of
+        # a second), so we want to have the hand stabilize first before determining a drop or grab
 
-        self.confirm_cap = 5
+        # Similar role to the grace period, but different functionality
+        self.stability_timer = 0
+
+        # The threshold where we can conclude that the hand is stablized
+        self.stability_timer_threshold = 5
 
         # Workaround for messed up hands
+        # Basically saying that if the confidence of the handedness is less that 0.7, change it to None because we don't
+        # actually really know what the best hand is
         if percentage >= 0.7:
             self.best_hand = handedness
         else:
             self.best_hand = None
 
+        # The lower and upper bound to what distance a hand travels still qualifies it being the same hand we were
+        # already tracking
         # Arbitrary values, need to mess around with
         self.distance_params = [curr_board.side_length / 4, curr_board.side_length]
+
+        # The lower and upper bound to what distance the fingers need to be at to qualify for the fingers to be close
+        # enough (grabbing something)
         # Trying to do sqrt(2) more than side length in the case of holding it by the diagonal
         self.grabbing_params = [0, curr_board.side_length * 1.35]
 
-        # Only bc my hand did that weird thing was 15 added
-        # self.max_gp = 15
-        self.max_gp = 1
-
-        self.toggle_gp = -6
-
+    # String representation of a hand, for debugging purposes
     def __str__(self):
         return str(self.last_loc[0]) + " " + str(self.last_loc[1]) + " " + str(self.handedness) \
                + " " + str(self.grabbing) + " " + str(self.slope)
 
+    # Debug representation of a hand, for debugging purposes
     def __repr__(self):
         return str(self.last_loc[0]) + " " + str(self.last_loc[1]) + " " + str(self.handedness) \
                + " " + str(self.grabbing) + " " + str(self.slope)
 
+    # Set the slope of the hand
     def set_hand_slope(self, mhl_val):
         self.slope = self.get_hand_slope(mhl_val)
 
+    # Get the slope of the hand using the middle fingertip and wrist
     def get_hand_slope(self, mhl_val):
         wrist = mhl_val[0]
         middle_tip = mhl_val[12]
         return math.tanh((wrist[1] - middle_tip[1]) / (wrist[0] - middle_tip[0]))
 
+    # Check if the hand is not moving
     def is_still(self, loc):
+        # Get the distance from the current location and the last location
         distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
         params = self.distance_params
+        # The distance should be less than the moving lower bounds to qualify as not moving
         return distance < params[0]
 
+    # Check if the hand is moving
     def is_moving(self, loc):
+        # Get the distance from the current location and the last location
         distance = eud_dist(loc[0], loc[1], self.last_loc[0], self.last_loc[1])
         params = self.distance_params
+        # The distance should be within the moving bounds to qualify as moving
         return params[0] < distance < params[1]
 
+    # Check if the hand rotated by seeing whether the slope of the hand changed a certain amount
     def is_rotated(self, mhl_val):
         return abs(self.slope - self.get_hand_slope(mhl_val)) < 0.25
 
     # Return new location and index if there, else return None
     def find_loc(self, mh, mhl):
         for i in range(0, len(mh)):
+            # Get the information about the current hand
             handedness = mh[i].classification._values[0].label
             percentage = mh[i].classification._values[0].score
+
+            # Get the coordinates of the points of the hand
             mhl_val = mhl[i]
+
+            # Get the wrist coordinates
             loc = mhl_val[0]
 
             # if self.handedness != handedness:
             #     return None, None
 
+            # Check if the hand is moving. If not, then no need to update the information
             if (self.is_moving(loc) or self.is_still(loc)) and self.is_rotated(mhl_val):
+                # If the handedness confidence is greater than 0.7, change the best hand value
                 if percentage > 0.7:
                     self.best_hand = handedness
+                # Update everything else and return the location of the hand and the index
                 self.handedness = handedness
                 self.percentage = percentage
                 self.set_hand_slope(mhl_val)
                 return loc, i
+        # Otherwise, if hand is not found, return None
         return None, None
 
+    # Update the last location of the hand
     # Return True if successful, else False
     def update_loc(self, mh, mhl):
+        # Get the location of the hand
         loc, ind = self.find_loc(mh, mhl)
+
+        # Update it if the location was found
         if loc is not None:
             self.last_loc = loc
             return True
         return False
 
+    # Check to see if the hand is grabbing something
     # Return True if grabbing, else False
     def is_grabbing(self, mh, mhl):
+        # If it's moving, just return whatever the old value was. We are assuming we can't throw items and we can't
+        # pick items up that quickly
         if self.moving:
             return self.grabbing
 
+        # Get location and index of the hand
         loc, ind = self.find_loc(mh, mhl)
+
+        # If hand is not found, then it's not moving
         if loc is None:
             return False
+
+        # Get the coordinates of the points on the hand
         hand_landmarks = mhl[ind]
 
         thumbIsOpen = False
@@ -245,32 +314,43 @@ class hand:
         thirdFingerIsOpen = False
         fourthFingerIsOpen = False
 
+        # Check if the thumb is open by comparing the tip and the joint before the tip with the joint two before the tip
         pseudoFixKeyPoint = hand_landmarks[2][0]
         if hand_landmarks[3][0] < pseudoFixKeyPoint and hand_landmarks[4][0] < pseudoFixKeyPoint:
             thumbIsOpen = True
 
+        # Check if the first finger is open by comparing the tip and the joint before the tip with the joint two before
+        # the tip
+        # If less, it is open because the two points are further "down" implying the finger is closed
+        # This is for the y-position
         pseudoFixKeyPoint = hand_landmarks[6][1]
         if hand_landmarks[7][1] < pseudoFixKeyPoint and hand_landmarks[8][1] < pseudoFixKeyPoint:
             firstFingerIsOpen = True
 
+        # This is for the x-position
         pseudoFixKeyPoint = hand_landmarks[6][0]
         if hand_landmarks[7][0] < pseudoFixKeyPoint and hand_landmarks[8][0] < pseudoFixKeyPoint:
             firstFingerIsOpen = True
 
+        # Second finger
         pseudoFixKeyPoint = hand_landmarks[10][1]
         if hand_landmarks[11][1] < pseudoFixKeyPoint and hand_landmarks[12][1] < pseudoFixKeyPoint:
             secondFingerIsOpen = True
 
+        # Third finger
         pseudoFixKeyPoint = hand_landmarks[14][1]
         if hand_landmarks[15][1] < pseudoFixKeyPoint and hand_landmarks[16][1] < pseudoFixKeyPoint:
             thirdFingerIsOpen = True
 
+        # Fourth finger
         pseudoFixKeyPoint = hand_landmarks[18][1]
         if hand_landmarks[19][1] < pseudoFixKeyPoint and hand_landmarks[20][1] < pseudoFixKeyPoint:
             fourthFingerIsOpen = True
 
         p = self.grabbing_params
 
+        # Check if the fingers are near the thumb. If so, then the given finger is doing a pinching motion with the
+        # thumb
         # p2 = (not firstFingerIsOpen) and is_thumb_near_finger(hand_landmarks, 2, p[0], p[1])
         p2 = is_thumb_near_finger(hand_landmarks, 2, p[0], p[1])
         p3 = (not secondFingerIsOpen) and is_thumb_near_finger(hand_landmarks, 3, p[0], p[1])
@@ -279,12 +359,17 @@ class hand:
         # pincher = p2 or p3 or p4 or p5
 
         # Workaround to messed up hand configs
+        # This is if the handedness is inaccurate then look at the "fourth" and "third" finger, which is probably
+        # actually the thumb and index finger
+
         # alt_pincher = (not fourthFingerIsOpen) and is_finger_near_finger(hand_landmarks, 4, 5, p[0], p[1])
         alt_pincher = is_finger_near_finger(hand_landmarks, 4, 5, p[0], p[1])
 
         # Focus on only index finger for now
         pincher = p2
         grab = not thumbIsOpen and pincher
+
+        # The check to see whether we should use the workaround to account for messed up handedness
         # if self.best_hand == self.handedness:
         #     grab = not thumbIsOpen and pincher
         # else:
@@ -292,31 +377,44 @@ class hand:
 
         return grab
 
+    # If the grab state has changed, update it and reset the timer for stability delay
     def update_grabbing(self, mh, mhl):
         new_grab = self.is_grabbing(mh, mhl)
         if self.grabbing != new_grab:
-            self.gradient = 0
+            self.stability_timer = 0
         self.grabbing = new_grab
 
     # Check if toggled from grabbing to not, and vice versa. Find loc, convert it to pic coordinates, and print it,
     # with the change. Return coordinates.
     def print_toggle(self, mh, mhl, img):
-        if self.grace_period <= self.max_gp:
+        # If grace period timer less than threshold, still in grace period, so don't check
+        if self.grace_period_timer <= self.grace_period_timer_threshold:
             return None, None, None
+
+        # Get location and index of hand
         loc, ind = self.find_loc(mh, mhl)
+        # If hand is not found, don't return coordinates
         if loc is not None:
+            # Get location of potential drop
             thumb = mhl[ind][4]
             index = mhl[ind][8]
             mid = find_midpoint(thumb[0], thumb[1], index[0], index[1])
             x = mid[0]
             y = mid[1]
+
+            # Check if the hand is stable and has toggled grab state
             grabbing = self.is_grabbing(mh, mhl)
-            if grabbing and not self.grabbing and self.gradient >= self.confirm_cap:
+            if grabbing and not self.grabbing and self.stability_timer >= self.stability_timer_threshold:
+                # Might not need
+                # self.grace_period = self.toggle_gp
+
                 print("Grabbed at ({}, {})".format(x, y))
-                self.grace_period = self.toggle_gp
                 return x, y, True
-            if self.grabbing and not grabbing and self.gradient >= self.confirm_cap:
-                self.grace_period = self.toggle_gp
+            if self.grabbing and not grabbing and self.stability_timer >= self.stability_timer_threshold:
+                # Might not need
+                #self.grace_period = self.toggle_gp
+
+
                 print("Released at ({}, {})".format(x, y))
                 return x, y, False
         return None, None, None
@@ -331,131 +429,140 @@ class hand:
         self.moving = self.is_moving(loc)
         self.update_grabbing(mh, mhl)
         self.update_loc(mh, mhl)
-        self.grace_period += 1
-        self.gradient += 1
+
+        # Update the times as well
+        self.grace_period_timer += 1
+        self.stability_timer += 1
         return ind
 
-board = None
 
-# For webcam input:
-hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
-cap = cv2.VideoCapture("./testVideos/IMG_4362.MOV")
-loh = []
-no_hands = None
-trigger = 10
-log = []
-while cap.isOpened():
-    success, image = cap.read()
+def main():
+    frame = 0
+    board = None
 
-    if not success:
-        print("Ignoring empty camera frame.")
-        # If loading a video, use 'break' instead of 'continue'.
-        break
+    # For webcam input:
+    hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5, max_num_hands=2)
+    cap = cv2.VideoCapture("./testVideos/IMG_4362.MOV")
+    loh = []
+    no_hands = None
+    trigger = 10
+    log = []
+    while cap.isOpened():
+        success, image = cap.read()
+        og_image = image
 
-    dsize = get_half_dimensions(image)
+        if not success:
+            print("Ignoring empty camera frame.")
+            # If loading a video, use 'break' instead of 'continue'.
+            break
 
-    # resize image
-    image = cv2.resize(image, dsize)
+        dsize = get_half_dimensions(image)
 
-    if board is None:
-        # Replace with board prompt
-        # board = contourUtil.Board(cv2.resize(image, dsize))
-        board = prompt_measurement(cap, image)
+        # resize image
+        image = cv2.resize(image, dsize)
 
-    # Flip the image horizontally for a later selfie-view display, and convert
-    # the BGR image to RGB.
-    image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
-    # To improve performance, optionally mark the image as not writeable to
-    # pass by reference.
-    image.flags.writeable = False
+        if board is None:
+            # Replace with board prompt
+            # board = contourUtil.Board(cv2.resize(image, dsize))
+            board = prompt_measurement(cap, image)
 
-    #print(frame)
-    # 137
-    if frame == 209:
-        stop = 0
+        # Flip the image horizontally for a later selfie-view display, and convert
+        # the BGR image to RGB.
+        image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+        # To improve performance, optionally mark the image as not writeable to
+        # pass by reference.
+        image.flags.writeable = False
 
-    results = hands.process(image)
+        #print(frame)
+        # 137
+        if frame == 209:
+            stop = 0
 
-    # Draw the hand annotations on the image.
-    image.flags.writeable = True
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        results = hands.process(image)
 
-    lod = []
-    cmh = deepcopy(results.multi_handedness)
+        # Draw the hand annotations on the image.
+        image.flags.writeable = True
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
-    if cmh is not None:
-        cmhl = hlist_to_coords(results.multi_hand_landmarks, dsize)
-        ind = 0
-        while len(loh) > ind:
-            temp_hand = loh[ind]
-            x, y, release = temp_hand.print_toggle(cmh, cmhl, image)
+        lod = []
+        cmh = deepcopy(results.multi_handedness)
 
-            if release is not None:
-                if release:
-                    board.remove_single(x, y)
+        if cmh is not None:
+            cmhl = hlist_to_coords(results.multi_hand_landmarks, dsize)
+            ind = 0
+            while len(loh) > ind:
+                temp_hand = loh[ind]
+                x, y, release = temp_hand.print_toggle(cmh, cmhl, image)
+
+                if release is not None:
+                    if release:
+                        board.remove_single(x, y)
+                    else:
+                        board.add_single(x, y)
+
+                    # Log used to keep track of what was dropped and picked up
+                    log.append([x, y, release])
+
+                if x is not None:
+                    lod.append((x, y))
+                rem = temp_hand.update_everything(cmh, cmhl)
+                if rem is not None:
+                    cmh.pop(rem)
+                    cmhl.pop(rem)
+                    ind += 1
                 else:
-                    board.add_single(x, y)
+                    loh.pop(ind)
+            for index in range(0, len(cmh)):
+                temp_hand = hand(cmhl[index], cmh[index].classification._values[0].label,
+                                 cmh[index].classification._values[0].score, board)
+                loh.append(temp_hand)
+            no_hands = 0
+        else:
+            loh = []
+            if no_hands is not None:
+                no_hands += 1
 
-                # Log used to keep track of what was dropped and picked up
-                log.append([x, y, release])
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-            if x is not None:
-                lod.append((x, y))
-            rem = temp_hand.update_everything(cmh, cmhl)
-            if rem is not None:
-                cmh.pop(rem)
-                cmhl.pop(rem)
-                ind += 1
-            else:
-                loh.pop(ind)
-        for index in range(0, len(cmh)):
-            temp_hand = hand(cmhl[index], cmh[index].classification._values[0].label,
-                             cmh[index].classification._values[0].score, board)
-            loh.append(temp_hand)
-        no_hands = 0
-    else:
-        loh = []
-        if no_hands is not None:
-            no_hands += 1
+        for h in range(0, len(loh)):
+            # print(str(h) + ": " + str(loh[h]))
+            continue
 
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+        # if len(loh) > 0:
+        #     # Test if it's moving
+        #     for val in loh:
+        #         print(val)
+        #     print("     ")
+        #     # if val.moving:
+        #     #     print("moving")
 
-    for h in range(0, len(loh)):
-        # print(str(h) + ": " + str(loh[h]))
-        continue
+        if no_hands is not None and no_hands > trigger:
+            # board.surface_level(og_image)
+            board.surface_level(image)
+            no_hands = 0
 
-    # if len(loh) > 0:
-    #     # Test if it's moving
-    #     for val in loh:
-    #         print(val)
-    #     print("     ")
-    #     # if val.moving:
-    #     #     print("moving")
+        for d in lod:
+            x = int(d[0])
+            y = int(d[1])
+            image = cv2.circle(image, (x, y), 50, (255, 0, 0), 10)
 
-    if no_hands is not None and no_hands > trigger:
-        board.surface_level(image)
-        no_hands = 0
+        image = drawlines(dsize, image, board)
 
-    for d in lod:
-        x = int(d[0])
-        y = int(d[1])
-        image = cv2.circle(image, (x, y), 50, (255, 0, 0), 10)
+        for i in range(0, len(board.top)):
+            for j in range(0, len(board.top[0])):
+                if board.top[i][j] != 0:
+                    cx, cy = board.centers[i][j]
+                    image = cv2.circle(image, (cx, cy), 30, (0, 255, 0), 10)
 
-    image = drawlines(dsize, image, board)
+        cv2.imshow('MediaPipe Hands', image)
+        if cv2.waitKey(5) & 0xFF == 27:
+            break
 
-    for i in range(0, len(board.top)):
-        for j in range(0, len(board.top[0])):
-            if board.top[i][j] != 0:
-                cx, cy = board.centers[i][j]
-                image = cv2.circle(image, (cx, cy), 30, (0, 255, 0), 10)
+        frame += 1
+    hands.close()
+    cap.release()
 
-    cv2.imshow('MediaPipe Hands', image)
-    if cv2.waitKey(5) & 0xFF == 27:
-        break
-
-    frame += 1
-hands.close()
-cap.release()
-
+if __name__ == "__main__":
+    main()
