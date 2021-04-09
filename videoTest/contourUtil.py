@@ -13,6 +13,16 @@ import numpy as np
 # index set: the indices that the drop point has in the 2D array. Maps to point that tells Minecraft where to
 # build (pretend the building space in Minecraft is a grid)
 
+#########################
+# ADJUSTABLE PARAMETERS #
+#########################
+
+# self.side_length
+# self.side_deviation_threshold
+# self.border_ratio
+# function get_contours – every param used in the functions
+
+
 class Board:
 
     def __init__(self, img):

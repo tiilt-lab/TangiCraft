@@ -40,6 +40,19 @@ from videoTest import contourUtil
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
+#########################
+# ADJUSTABLE PARAMETERS #
+#########################
+
+# self.grace_period_timer
+# self.grace_period_timer_threshold
+# self.grace_period_reset_toggle
+# self.stability_timer
+# self.stability_timer_threshold
+# self.distance_params
+# self.grabbing_params
+# function find_loc – percentage threshold
+# variable trigger – line 461
 
 # Get euclidean distance of two points
 def eud_dist(a_x, a_y, b_x, b_y):
