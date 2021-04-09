@@ -284,10 +284,11 @@ class hand:
 
         # Focus on only index finger for now
         pincher = p2
-        if self.best_hand == self.handedness:
-            grab = not thumbIsOpen and pincher
-        else:
-            grab = not thirdFingerIsOpen and alt_pincher
+        grab = not thumbIsOpen and pincher
+        # if self.best_hand == self.handedness:
+        #     grab = not thumbIsOpen and pincher
+        # else:
+        #     grab = not thirdFingerIsOpen and alt_pincher
 
         return grab
 
@@ -370,7 +371,7 @@ while cap.isOpened():
 
     #print(frame)
     # 137
-    if frame == 210:
+    if frame == 209:
         stop = 0
 
     results = hands.process(image)
